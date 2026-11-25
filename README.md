@@ -1,28 +1,17 @@
 # Shellagram
 
-Private single-owner Telegram authentication. Sign in from your phone, and the already paired desktop browser is authorized in the same database transaction. It authenticates Shellagram itself, not Telegram Web, your operating system, or other websites. No Telegram session or login code is transferred.
+GitHub Pages frontend + isolated Supabase schema and Edge Function. No Vercel. Shellagram authorizes only its own sessions, not Telegram Web or unrelated websites.
 
-## Setup
+## Deployment
 
-1. Import this repository into Vercel (Other framework, Node 22, public output directory). GitHub Actions runs tests; GitHub Pages alone cannot host the backend.
-2. Create a dedicated Supabase project and run db/setup.sql in SQL Editor. Run db/verify.sql for transactional checks. Use the project's URL and server-only secret API key (sb_secret_...). Ensure public is an exposed Data API schema.
-3. Create your bot in official @BotFather and configure Login Widget settings. Obtain the OIDC Client ID and Client Secret; retain RS256. Register your HTTPS app origin and the exact redirect URI at /api/callback.
-4. Obtain your own numeric Telegram user ID from a trusted source, for example your own bot's getUpdates response after you message it. Never disclose a login code or Telegram password.
-5. Configure Vercel production environment variables from .env.example. APP_ORIGIN is the exact HTTPS origin without trailing slash. TELEGRAM_OWNER_ID is your numeric ID, TELEGRAM_CLIENT_ID and TELEGRAM_CLIENT_SECRET are the OIDC credentials, SUPABASE_URL and SUPABASE_SECRET_KEY are your dedicated project settings. FLOW_KEY is 32 random bytes encoded in 64 hex characters; generate locally with node -e "console.log(require('crypto').randomBytes(32).toString('hex'))". Never commit these values. Redeploy.
+Set GitHub Pages source to GitHub Actions in Settings > Pages. The Pages workflow checks the source and deploys public/. The live backend is shellagram-auth in the existing Supabase project. The shellagram.devices table is private; public.shellagram_transition is executable only by service_role. The database migration and rollback-only checks are in db/. The Edge Function source is in supabase/functions/shellagram-auth/.
 
-## Acceptance test
+BotFather: create a bot, open Login Widget, keep RS256, add https://marcusdhaynes.github.io and https://marcusdhaynes.github.io/Shellagram/ to Allowed URLs. Configure SHELLAGRAM_TELEGRAM_CLIENT_ID, SHELLAGRAM_TELEGRAM_CLIENT_SECRET, SHELLAGRAM_TELEGRAM_OWNER_ID in Supabase Edge Function Secrets. No bot token or Telegram password is required at runtime. The owner ID is the numeric Telegram user ID, not a username or bot ID.
 
-- Sign in on your desktop once and select Trust This Browser As Desktop. Confirm only on a private computer.
-- Sign out here and leave the desktop page open.
-- Open the same production URL on your phone, preferably using cellular data. Sign in with Telegram.
-- Both are authorized immediately at the server. The desktop UI refreshes on a 3-second visible polling interval under normal connectivity (hidden tabs may be throttled); closed or sleeping browsers refresh upon reopening if the authorization is still valid.
-- Test Lock Home Desktop, Forget Home Desktop, Lock All Devices, and rejection of another Telegram account.
-- Sessions last 12 hours and pairing lasts 90 days (renewed by direct desktop login). Use your operating system lock to protect physical access to the trusted browser.
+Open https://marcusdhaynes.github.io/Shellagram/ on desktop, sign in with Telegram, select Trust This Browser As Desktop, then Sign Out Here. On mobile, open the same URL and sign in with Telegram. Both sessions are authorized atomically; the desktop normally refreshes in up to three seconds if visible and online. Hidden or sleeping tabs update when reopened subject to the 12-hour session limit. Device pairing expires after 90 days.
 
-## Checks
+## Security
 
-Run npm ci --ignore-scripts, npm run check, npm test, npm start. The local HTTP UI preview is not a live Telegram login. Automated tests use mocked provider/database responses; the SQL checks exercise real database transitions in CI. Real provider and physical-device acceptance tests remain necessary.
+Telegram OAuth authorization code + PKCE, encrypted state, signature/issuer/audience/time/owner checks, random hashed device credentials, restricted RPC and RLS, no provider access token persisted. GitHub Pages is static; the edge function performs all privileged operations. This frontend stores the browser-specific opaque Shellagram token in localStorage for cross-browser compatibility. Other GitHub Pages apps under the same github.io hostname share the browser origin and could access it. Use a dedicated Shellagram HTTPS domain for strong frontend origin isolation before relying on it for sensitive data; changing origin requires updating BotFather and the Edge Function. The shared Supabase service role is privileged across the project, not a separate database security boundary. Use the OS screen lock and only trust a private desktop.
 
-All secrets stay on the server. RLS and explicit grants deny public database RPC access. Every future protected API must check active server-side authorization. Configure rate limiting and monitor serverless usage from polling. No runtime package dependencies.
-
-Official documentation: https://core.telegram.org/bots/telegram-login and https://supabase.com/docs/guides/getting-started/api-keys
+The legacy Node handler and tests remain as a local simulation of the original same-origin design, not a production deployment. SQL checks verify the actual database logic; real Telegram and device tests are still required.
