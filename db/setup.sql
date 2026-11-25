@@ -161,3 +161,28 @@ end; $$;
 revoke all on function public.shellagram_delete_message(text,text,bigint) from public, anon, authenticated;
 grant execute on function public.shellagram_delete_message(text,text,bigint) to service_role;
 commit;
+
+-- Telegram-style media support (Nov 25, 2026)
+begin;
+alter table shellagram.messages add column if not exists media_type text;
+alter table shellagram.messages add column if not exists media_ref text;
+alter table shellagram.messages add column if not exists media_path text;
+create or replace function public.shellagram_messages(p_owner text, p_hash text, p_limit integer default 100, p_before bigint default null, p_search text default null)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; ok boolean;
+begin
+  if p_hash is null or p_hash !~ '^[a-f0-9]{64}$' then return pg_catalog.jsonb_build_object('signedIn', false, 'messages', '[]'::jsonb); end if;
+  t := pg_catalog.clock_timestamp();
+  select exists(select 1 from shellagram.devices where owner_id=p_owner and token_hash=p_hash and active_until>t) into ok;
+  if not ok then return pg_catalog.jsonb_build_object('signedIn', false, 'messages', '[]'::jsonb); end if;
+  return pg_catalog.jsonb_build_object('signedIn', true, 'messages', coalesce((
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', m.tg_id, 'from', m.sender, 'at', m.sent_at, 'text', m.body,
+      'media', case when m.media_type is null then null else pg_catalog.jsonb_build_object('type', m.media_type, 'available', m.media_path is not null) end) order by m.tg_id desc)
+    from (select tg_id, sender, sent_at, body, media_type, media_path from shellagram.messages
+          where not deleted
+            and (p_before is null or tg_id < p_before)
+            and (p_search is null or p_search = '' or body ilike '%' || p_search || '%')
+          order by tg_id desc limit least(greatest(coalesce(p_limit,100),1),200)) m
+  ), '[]'::jsonb));
+end; $$;
+commit;
