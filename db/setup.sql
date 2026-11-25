@@ -141,7 +141,7 @@ begin
           where not deleted
             and (p_before is null or tg_id < p_before)
             and (p_search is null or p_search = '' or body ilike '%' || p_search || '%')
-          order by tg_id desc limit pg_catalog.least(greatest(coalesce(p_limit,100),1),200)) m
+          order by tg_id desc limit least(greatest(coalesce(p_limit,100),1),200)) m
   ), '[]'::jsonb));
 end; $$;
 revoke all on function public.shellagram_messages(text,text,integer,bigint,text) from public, anon, authenticated;
