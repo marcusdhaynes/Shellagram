@@ -1,3 +1,0 @@
-import http from 'node:http';import {readFile} from 'node:fs/promises';import auth from './api/auth.js';
-const files={'/':['index.html','text/html'],'/style.css':['style.css','text/css'],'/app.js':['app.js','text/javascript']};
-http.createServer(async(req,res)=>{const path=new URL(req.url,'http://localhost').pathname;if((path==='/api/auth'||path==='/api/callback'))return auth(req,res);if(!files[path]){res.statusCode=404;return res.end();}const [file,type]=files[path];res.setHeader('Content-Type',type);res.end(await readFile(new URL('./public/'+file,import.meta.url)));}).listen(3000,'127.0.0.1',()=>console.log('UI preview: http://127.0.0.1:3000 (real auth requires HTTPS deployment)'));
