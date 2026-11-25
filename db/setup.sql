@@ -60,4 +60,56 @@ begin
 end; $$;
 revoke all on function public.shellagram_transition(text,text,text,text) from public, anon, authenticated;
 grant execute on function public.shellagram_transition(text,text,text,text) to service_role;
+
+-- Rate limiting (stateless Edge Functions need DB-backed counters).
+create table if not exists shellagram.rate_limits (
+  bucket text not null,
+  window_start timestamptz not null,
+  hits integer not null default 0,
+  primary key (bucket, window_start)
+);
+alter table shellagram.rate_limits enable row level security;
+revoke all on shellagram.rate_limits from public, anon, authenticated;
+grant select, insert, update, delete on shellagram.rate_limits to service_role;
+create or replace function public.shellagram_rate_check(p_key text, p_limit integer, p_window_seconds integer)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; w timestamptz; n integer;
+begin
+  if p_key is null or length(p_key) <> 64 or p_limit is null or p_limit < 1 or p_window_seconds is null or p_window_seconds < 1 or p_window_seconds > 86400 then raise exception 'Invalid rate limit request'; end if;
+  t := pg_catalog.clock_timestamp();
+  w := pg_catalog.to_timestamp(pg_catalog.floor(extract(epoch from t) / p_window_seconds) * p_window_seconds);
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('shellagram-rate:' || p_key, 0));
+  insert into shellagram.rate_limits(bucket, window_start, hits) values (p_key, w, 1)
+    on conflict (bucket, window_start) do update set hits = shellagram.rate_limits.hits + 1
+    returning hits into n;
+  if n = 1 then delete from shellagram.rate_limits where bucket = p_key and window_start < w; end if;
+  if n > p_limit then
+    return pg_catalog.jsonb_build_object('allowed', false, 'retryAfter', ceil(extract(epoch from (w + (p_window_seconds || ' seconds')::interval - t)))::integer);
+  end if;
+  return pg_catalog.jsonb_build_object('allowed', true, 'retryAfter', 0);
+end; $$;
+revoke all on function public.shellagram_rate_check(text,integer,integer) from public, anon, authenticated;
+grant execute on function public.shellagram_rate_check(text,integer,integer) to service_role;
+-- Replay prevention: a completed login flow (keyed by hash of its state) may be used once.
+create table if not exists shellagram.used_flows (
+  flow_hash text primary key check (flow_hash ~ '^[a-f0-9]{64}$'),
+  expires_at timestamptz not null
+);
+alter table shellagram.used_flows enable row level security;
+revoke all on shellagram.used_flows from public, anon, authenticated;
+grant select, insert, delete on shellagram.used_flows to service_role;
+create or replace function public.shellagram_use_flow(p_hash text)
+returns boolean language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; n integer := 0;
+begin
+  if p_hash is null or p_hash !~ '^[a-f0-9]{64}$' then raise exception 'Invalid flow hash'; end if;
+  t := pg_catalog.clock_timestamp();
+  delete from shellagram.used_flows where expires_at <= t;
+  insert into shellagram.used_flows(flow_hash, expires_at) values (p_hash, t + interval '15 minutes')
+    on conflict (flow_hash) do nothing;
+  get diagnostics n = row_count;
+  return n > 0;
+end; $$;
+revoke all on function public.shellagram_use_flow(text) from public, anon, authenticated;
+grant execute on function public.shellagram_use_flow(text) to service_role;
 commit;
