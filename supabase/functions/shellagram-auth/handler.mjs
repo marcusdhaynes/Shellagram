@@ -39,12 +39,18 @@ export const RATE_LIMITS = {
 
 export function createHandler({ getEnv, fetcher = fetch } = {}) {
   const envGet = getEnv || ((k) => globalThis.Deno?.env.get(k));
-  let keysCache;
+  let keysCache, lastConfigWarning;
   const reply = (data, status = 200, extra = {}) => new Response(JSON.stringify(data), { status, headers: { ...cors, 'Content-Type': 'application/json', ...extra } });
 
   function config() {
     const clientId = envGet('SHELLAGRAM_TELEGRAM_CLIENT_ID'), secret = envGet('SHELLAGRAM_TELEGRAM_CLIENT_SECRET'), ownerId = envGet('SHELLAGRAM_TELEGRAM_OWNER_ID'), db = envGet('SUPABASE_URL'), key = envGet('SUPABASE_SERVICE_ROLE_KEY');
-    if (!/^\d+$/.test(clientId || '') || !secret || !/^\d+$/.test(ownerId || '') || !db || !key) return null;
+    const invalid = [!/^\d+$/.test(clientId || '') && 'SHELLAGRAM_TELEGRAM_CLIENT_ID', !secret && 'SHELLAGRAM_TELEGRAM_CLIENT_SECRET', !/^\d+$/.test(ownerId || '') && 'SHELLAGRAM_TELEGRAM_OWNER_ID', !db && 'SUPABASE_URL', !key && 'SUPABASE_SERVICE_ROLE_KEY'].filter(Boolean);
+    if (invalid.length) {
+      const warning = invalid.join(', ');
+      if (lastConfigWarning !== warning) { console.warn('shellagram-auth configuration missing or invalid: ' + warning); lastConfigWarning = warning; }
+      return null;
+    }
+    lastConfigWarning = undefined;
     return { clientId, secret, ownerId, db, key, flowKey: hash('shellagram-flow-v1:' + secret) };
   }
 
