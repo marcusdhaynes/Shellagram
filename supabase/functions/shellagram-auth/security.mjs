@@ -15,10 +15,10 @@ export function unseal(value,key,now=Date.now()) {
   const b=Buffer.from(value,'base64url'); if(b.length<29) throw Error('Invalid flow');
   const c=createDecipheriv('aes-256-gcm',Buffer.from(key,'hex'),b.subarray(0,12)); c.setAuthTag(b.subarray(-16));
   const p=JSON.parse(Buffer.concat([c.update(b.subarray(12,-16)),c.final()]));
-  if(!validSecret(p.state)||!validSecret(p.verifier)||!Number.isSafeInteger(p.exp)||p.exp<=now||p.exp>now+600000) throw Error('Expired flow');
+  if(!validSecret(p.state)||!validSecret(p.verifier)||(p.nonce!==undefined&&!validSecret(p.nonce))||!Number.isSafeInteger(p.exp)||p.exp<=now||p.exp>now+600000) throw Error('Expired flow');
   return p;
 }
-export function verifyIdentity(token,jwks,{clientId,ownerId,now=Math.floor(Date.now()/1000)}) {
+export function verifyIdentity(token,jwks,{clientId,ownerId,nonce,now=Math.floor(Date.now()/1000)}) {
   if(typeof token!=='string'||token.length>16000) throw Error('Invalid ID token');
   const parts=token.split('.'); if(parts.length!==3||parts.some(p=>!p||!/^[A-Za-z0-9_-]+$/.test(p))) throw Error('Invalid token encoding');
   const [h,p,s]=parts, header=JSON.parse(Buffer.from(h,'base64url')), claims=JSON.parse(Buffer.from(p,'base64url'));
@@ -26,6 +26,7 @@ export function verifyIdentity(token,jwks,{clientId,ownerId,now=Math.floor(Date.
   const keys=jwks.keys.filter(k=>k.kid===header.kid&&k.kty==='RSA'&&(!k.use||k.use==='sig')&&(!k.alg||k.alg==='RS256'));
   if(keys.length!==1||!verify('RSA-SHA256',Buffer.from(h+'.'+p),createPublicKey({key:keys[0],format:'jwk'}),Buffer.from(s,'base64url'))) throw Error('Invalid signature');
   if(claims.iss!==issuer||claims.aud!==clientId||typeof claims.sub!=='string'||!claims.sub||!Number.isSafeInteger(claims.exp)||claims.exp<=now||!Number.isSafeInteger(claims.iat)||claims.iat>now+60||claims.iat<now-600||(claims.nbf!==undefined&&(!Number.isSafeInteger(claims.nbf)||claims.nbf>now+30))) throw Error('Invalid claims');
+  if(nonce!==undefined){if(claims.nonce!==undefined&&!equal(String(claims.nonce),String(nonce))) throw Error('Nonce mismatch');}
   if(!((typeof claims.id==='number'&&Number.isSafeInteger(claims.id))||(typeof claims.id==='string'&&/^\d+$/.test(claims.id)))||String(claims.id)!==ownerId) throw Error('Account not allowed');
   return String(claims.id);
 }
