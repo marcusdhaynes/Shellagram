@@ -186,3 +186,38 @@ begin
   ), '[]'::jsonb));
 end; $$;
 commit;
+
+-- Live service URL registry (Nov 25, 2026)
+begin;
+create table if not exists shellagram.live_config (
+  k text primary key,
+  v text not null,
+  updated_at timestamptz not null default now()
+);
+alter table shellagram.live_config enable row level security;
+revoke all on shellagram.live_config from public, anon, authenticated;
+grant select, insert, update on shellagram.live_config to service_role;
+create or replace function public.shellagram_live_url(p_owner text, p_hash text)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; ok boolean; u text;
+begin
+  if p_hash is null or p_hash !~ '^[a-f0-9]{64}$' then return pg_catalog.jsonb_build_object('url', null); end if;
+  t := pg_catalog.clock_timestamp();
+  select exists(select 1 from shellagram.devices where owner_id=p_owner and token_hash=p_hash and active_until>t) into ok;
+  if not ok then return pg_catalog.jsonb_build_object('url', null); end if;
+  select v into u from shellagram.live_config where k='live_url';
+  return pg_catalog.jsonb_build_object('url', u);
+end; $$;
+revoke all on function public.shellagram_live_url(text,text) from public, anon, authenticated;
+grant execute on function public.shellagram_live_url(text,text) to service_role;
+create or replace function public.shellagram_live_register(p_url text)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+begin
+  if p_url is null or p_url !~ '^https://[a-z0-9-]+\.trycloudflare\.com$' then return pg_catalog.jsonb_build_object('error','bad url'); end if;
+  insert into shellagram.live_config(k, v, updated_at) values ('live_url', p_url, now())
+    on conflict (k) do update set v=excluded.v, updated_at=now();
+  return pg_catalog.jsonb_build_object('registered', true);
+end; $$;
+revoke all on function public.shellagram_live_register(text) from public, anon, authenticated;
+grant execute on function public.shellagram_live_register(text) to service_role;
+commit;

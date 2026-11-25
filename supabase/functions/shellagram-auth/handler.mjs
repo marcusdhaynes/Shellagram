@@ -36,6 +36,8 @@ export const RATE_LIMITS = {
   'forget-desktop': [30, 600, 60],
   'lock-all': [30, 600, 60],
   messages: [300, 300, 300],
+  'live-url': [300, 300, 120],
+  'live-register': [10, 600, null],
   'delete-message': [120, 600, 120],
 };
 
@@ -53,7 +55,7 @@ export function createHandler({ getEnv, fetcher = fetch } = {}) {
       return null;
     }
     lastConfigWarning = undefined;
-    return { clientId, secret, ownerId, db, key, flowKey: hash('shellagram-flow-v1:' + secret) };
+    return { clientId, secret, ownerId, db, key, serviceKey: envGet('SHELLAGRAM_SERVICE_KEY') || null, flowKey: hash('shellagram-flow-v1:' + secret) };
   }
 
   async function rpc(c, name, body) {
@@ -122,6 +124,18 @@ export function createHandler({ getEnv, fetcher = fetch } = {}) {
         if (fresh_use !== true) return reply({ error: 'Telegram login rejected or expired.' }, 401);
         const fresh = random(), s = await transition(c, 'login', token, fresh);
         return reply({ ...s, token: fresh });
+      }
+      if (action === 'live-register') {
+        const rl = await enforceRate(c, req, 'live-register', token); if (!rl.allowed) return tooMany(rl);
+        if (!c.serviceKey || typeof b.serviceKey !== 'string' || !equal(b.serviceKey, c.serviceKey)) return reply({ error: 'Forbidden' }, 403);
+        const out = await rpc(c, 'shellagram_live_register', { p_url: typeof b.url === 'string' ? b.url : null });
+        return reply(out, out && out.error ? 400 : 200);
+      }
+      if (action === 'live-url') {
+        const rl = await enforceRate(c, req, 'live-url', token); if (!rl.allowed) return tooMany(rl);
+        if (!validSecret(token)) return reply({ url: null });
+        const out = await rpc(c, 'shellagram_live_url', { p_owner: c.ownerId, p_hash: hash(token) });
+        return reply(out);
       }
       if (action === 'messages' || action === 'delete-message') {
         const rl = await enforceRate(c, req, action, token); if (!rl.allowed) return tooMany(rl);
