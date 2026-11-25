@@ -1,4 +1,11 @@
 {
-  "name":"shellagram","version":"0.1.0","private":true,"type":"module","engines":{"node":">=22"},
-  "scripts":{"test":"node --test","start":"node local.mjs","check":"node --check api/auth.js && node --check public/app.js && node --check lib/security.mjs && node --check local.mjs && node --check api/callback.js"}
+  "name": "shellagram",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check public/app.js && node --check supabase/functions/shellagram-auth/security.mjs && node --check supabase/functions/shellagram-auth/handler.mjs && node --check test/production/security.test.mjs && node --check test/production/handler.test.mjs"
+  }
 }
