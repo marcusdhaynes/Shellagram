@@ -4,6 +4,8 @@ GitHub Pages frontend + isolated Supabase schema and Edge Function. No Vercel. S
 
 ## Deployment
 
+Status (Nov 24, 2026): hardened backend and tests are in the repo and the database migration is applied to the live project; the Edge Function redeploy and Telegram secret configuration are the remaining activation steps (see docs/security-hardening.md).
+
 Set GitHub Pages source to GitHub Actions in Settings > Pages. The Pages workflow checks the source and deploys public/. The live backend is shellagram-auth in the existing Supabase project. The shellagram.devices table is private; public.shellagram_transition is executable only by service_role. The database migration and rollback-only checks are in db/. The Edge Function source is in supabase/functions/shellagram-auth/.
 
 BotFather: create a bot, open Login Widget, keep RS256, add https://marcusdhaynes.github.io and https://marcusdhaynes.github.io/Shellagram/ to Allowed URLs. Configure SHELLAGRAM_TELEGRAM_CLIENT_ID, SHELLAGRAM_TELEGRAM_CLIENT_SECRET, SHELLAGRAM_TELEGRAM_OWNER_ID in Supabase Edge Function Secrets. No bot token or Telegram password is required at runtime. The owner ID is the numeric Telegram user ID, not a username or bot ID.
