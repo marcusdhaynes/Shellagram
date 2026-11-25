@@ -35,6 +35,8 @@ export const RATE_LIMITS = {
   'lock-desktop': [30, 600, 60],
   'forget-desktop': [30, 600, 60],
   'lock-all': [30, 600, 60],
+  messages: [300, 300, 300],
+  'delete-message': [120, 600, 120],
 };
 
 export function createHandler({ getEnv, fetcher = fetch } = {}) {
@@ -120,6 +122,16 @@ export function createHandler({ getEnv, fetcher = fetch } = {}) {
         if (fresh_use !== true) return reply({ error: 'Telegram login rejected or expired.' }, 401);
         const fresh = random(), s = await transition(c, 'login', token, fresh);
         return reply({ ...s, token: fresh });
+      }
+      if (action === 'messages' || action === 'delete-message') {
+        const rl = await enforceRate(c, req, action, token); if (!rl.allowed) return tooMany(rl);
+        if (!validSecret(token)) return action === 'messages' ? reply({ signedIn: false, messages: [] }) : reply({ error: 'Sign in first' }, 401);
+        if (action === 'messages') {
+          const out = await rpc(c, 'shellagram_messages', { p_owner: c.ownerId, p_hash: hash(token), p_limit: Number.isInteger(b.limit) ? b.limit : 100, p_before: Number.isInteger(b.before) ? b.before : null, p_search: typeof b.search === 'string' ? b.search.slice(0, 100) : null });
+          return reply(out);
+        }
+        const out = await rpc(c, 'shellagram_delete_message', { p_owner: c.ownerId, p_hash: hash(token), p_id: Number.isInteger(b.id) ? b.id : null });
+        return reply(out, out && out.error ? 403 : 200);
       }
       if (!['status', 'trust', 'logout', 'lock-desktop', 'forget-desktop', 'lock-all'].includes(action)) return reply({ error: 'Unknown action' }, 404);
       const rl = await enforceRate(c, req, action, token); if (!rl.allowed) return tooMany(rl);

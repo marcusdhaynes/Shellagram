@@ -113,3 +113,51 @@ end; $$;
 revoke all on function public.shellagram_use_flow(text) from public, anon, authenticated;
 grant execute on function public.shellagram_use_flow(text) to service_role;
 commit;
+
+-- Partner backend messages (added Nov 25, 2026)
+begin;
+create table if not exists shellagram.messages (
+  tg_id bigint primary key,
+  sender text not null,
+  sent_at timestamptz not null,
+  body text not null,
+  deleted boolean not null default false
+);
+create index if not exists sg_messages_recent on shellagram.messages(sent_at desc) where not deleted;
+alter table shellagram.messages enable row level security;
+revoke all on shellagram.messages from public, anon, authenticated;
+grant select, insert, update on shellagram.messages to service_role;
+create or replace function public.shellagram_messages(p_owner text, p_hash text, p_limit integer default 100, p_before bigint default null, p_search text default null)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; ok boolean;
+begin
+  if p_hash is null or p_hash !~ '^[a-f0-9]{64}$' then return pg_catalog.jsonb_build_object('signedIn', false, 'messages', '[]'::jsonb); end if;
+  t := pg_catalog.clock_timestamp();
+  select exists(select 1 from shellagram.devices where owner_id=p_owner and token_hash=p_hash and active_until>t) into ok;
+  if not ok then return pg_catalog.jsonb_build_object('signedIn', false, 'messages', '[]'::jsonb); end if;
+  return pg_catalog.jsonb_build_object('signedIn', true, 'messages', coalesce((
+    select pg_catalog.jsonb_agg(pg_catalog.jsonb_build_object('id', m.tg_id, 'from', m.sender, 'at', m.sent_at, 'text', m.body) order by m.tg_id desc)
+    from (select tg_id, sender, sent_at, body from shellagram.messages
+          where not deleted
+            and (p_before is null or tg_id < p_before)
+            and (p_search is null or p_search = '' or body ilike '%' || p_search || '%')
+          order by tg_id desc limit pg_catalog.least(greatest(coalesce(p_limit,100),1),200)) m
+  ), '[]'::jsonb));
+end; $$;
+revoke all on function public.shellagram_messages(text,text,integer,bigint,text) from public, anon, authenticated;
+grant execute on function public.shellagram_messages(text,text,integer,bigint,text) to service_role;
+create or replace function public.shellagram_delete_message(p_owner text, p_hash text, p_id bigint)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; ok boolean; n integer := 0;
+begin
+  if p_hash is null or p_hash !~ '^[a-f0-9]{64}$' or p_id is null then return pg_catalog.jsonb_build_object('error','Sign in first'); end if;
+  t := pg_catalog.clock_timestamp();
+  select exists(select 1 from shellagram.devices where owner_id=p_owner and token_hash=p_hash and active_until>t) into ok;
+  if not ok then return pg_catalog.jsonb_build_object('error','Sign in first'); end if;
+  update shellagram.messages set deleted=true where tg_id=p_id and not deleted;
+  get diagnostics n = row_count;
+  return pg_catalog.jsonb_build_object('deleted', n > 0);
+end; $$;
+revoke all on function public.shellagram_delete_message(text,text,bigint) from public, anon, authenticated;
+grant execute on function public.shellagram_delete_message(text,text,bigint) to service_role;
+commit;
