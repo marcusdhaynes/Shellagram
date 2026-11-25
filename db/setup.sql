@@ -221,3 +221,32 @@ end; $$;
 revoke all on function public.shellagram_live_register(text) from public, anon, authenticated;
 grant execute on function public.shellagram_live_register(text) to service_role;
 commit;
+
+-- Delete tombstones + deleted-ids (Nov 25, 2026)
+begin;
+create or replace function public.shellagram_delete_message(p_owner text, p_hash text, p_id bigint)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; ok boolean; n integer := 0;
+begin
+  if p_hash is null or p_hash !~ '^[a-f0-9]{64}$' or p_id is null then return pg_catalog.jsonb_build_object('error','Sign in first'); end if;
+  t := pg_catalog.clock_timestamp();
+  select exists(select 1 from shellagram.devices where owner_id=p_owner and token_hash=p_hash and active_until>t) into ok;
+  if not ok then return pg_catalog.jsonb_build_object('error','Sign in first'); end if;
+  insert into shellagram.messages(tg_id, sender, sent_at, body, deleted) values (p_id, '', t, '', true)
+    on conflict (tg_id) do update set deleted=true;
+  get diagnostics n = row_count;
+  return pg_catalog.jsonb_build_object('deleted', n > 0);
+end; $$;
+create or replace function public.shellagram_deleted_ids(p_owner text, p_hash text)
+returns jsonb language plpgsql security invoker set search_path = '' as $$
+declare t timestamptz; ok boolean;
+begin
+  if p_hash is null or p_hash !~ '^[a-f0-9]{64}$' then return '[]'::jsonb; end if;
+  t := pg_catalog.clock_timestamp();
+  select exists(select 1 from shellagram.devices where owner_id=p_owner and token_hash=p_hash and active_until>t) into ok;
+  if not ok then return '[]'::jsonb; end if;
+  return coalesce((select pg_catalog.jsonb_agg(tg_id) from shellagram.messages where deleted), '[]'::jsonb);
+end; $$;
+revoke all on function public.shellagram_deleted_ids(text,text) from public, anon, authenticated;
+grant execute on function public.shellagram_deleted_ids(text,text) to service_role;
+commit;

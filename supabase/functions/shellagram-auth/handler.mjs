@@ -37,6 +37,7 @@ export const RATE_LIMITS = {
   'lock-all': [30, 600, 60],
   messages: [300, 300, 300],
   'live-url': [300, 300, 120],
+  'deleted-ids': [300, 300, 120],
   'live-register': [10, 600, null],
   'delete-message': [120, 600, 120],
 };
@@ -136,6 +137,12 @@ export function createHandler({ getEnv, fetcher = fetch } = {}) {
         if (!validSecret(token)) return reply({ url: null });
         const out = await rpc(c, 'shellagram_live_url', { p_owner: c.ownerId, p_hash: hash(token) });
         return reply(out);
+      }
+      if (action === 'deleted-ids') {
+        const rl = await enforceRate(c, req, 'deleted-ids', token); if (!rl.allowed) return tooMany(rl);
+        if (!validSecret(token)) return reply({ ids: [] });
+        const ids = await rpc(c, 'shellagram_deleted_ids', { p_owner: c.ownerId, p_hash: hash(token) });
+        return reply({ ids: Array.isArray(ids) ? ids : [] });
       }
       if (action === 'messages' || action === 'delete-message') {
         const rl = await enforceRate(c, req, action, token); if (!rl.allowed) return tooMany(rl);
